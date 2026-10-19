@@ -11,8 +11,9 @@ var today=new Date(); var todayKey='pr-ticks-'+today.getFullYear()+'-'+(today.ge
 try{for(var i=localStorage.length-1;i>=0;i--){var k=localStorage.key(i); if(k&&k.indexOf('pr-ticks-')===0&&k!==todayKey) localStorage.removeItem(k)}}catch(e){}
 var ticks={}; try{ticks=JSON.parse(ls.get(todayKey)||'{}')||{}}catch(e){ticks={}}
 var S={day:null,edit:false,editing:null,adding:null,confirmDel:null,confirmReset:false,msg:'',err:'',restoreOpen:false};
-function pickDay(){var want=ls.get('pr-day'); if(want==='guide') return 'guide'; if(want&&plan.days.some(function(d){return d.id===want})) return want;
- var wd=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][today.getDay()]; var m=plan.days.filter(function(d){return d.weekday===wd})[0]; return m?m.id:plan.days[0].id;}
+// Training day: open today's workout. Rest day: reopen the last tab viewed.
+function pickDay(){var wd=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][today.getDay()]; var m=plan.days.filter(function(d){return d.weekday===wd})[0]; if(m) return m.id;
+ var want=ls.get('pr-day'); if(want==='guide') return 'guide'; if(want&&plan.days.some(function(d){return d.id===want})) return want; return plan.days[0].id;}
 S.day=pickDay();
 
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
