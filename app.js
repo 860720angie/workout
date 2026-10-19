@@ -29,6 +29,18 @@ function upgrade(p){
  if(Array.isArray(p.days)&&!p.blocks){ var b=JSON.parse(JSON.stringify(starter.blocks)); b[0].days=p.days; p={blocks:b}; }
  if(!Array.isArray(p.blocks)||!p.blocks.length) return null;
  for(var i=p.blocks.length;i<starter.blocks.length;i++) p.blocks.push(JSON.parse(JSON.stringify(starter.blocks[i])));
+ // exercises added in newer app versions go into an edited plan too (only those, so deleted ones stay deleted)
+ var pv=p.v||1;
+ if(pv<(starter.v||1)){
+  var newIds={}; (starter.added||[]).forEach(function(g){ if(g.v>pv) g.ids.forEach(function(id){newIds[id]=true}); });
+  starter.blocks.forEach(function(sb,bi){ var pb=p.blocks[bi]; if(!pb) return; sb.days.forEach(function(sd){ sd.sections.forEach(function(ss){
+   var ps=null; pb.days.forEach(function(d){ (d.sections||[]).forEach(function(x){ if(x.id===ss.id) ps=x; }); }); if(!ps) return;
+   if(ps.title===ss.title.replace('Hip and knee prep','Hip prep')) ps.title=ss.title;
+   ss.items.forEach(function(it,ix){ if(newIds[it.id]&&!ps.items.some(function(x){return x.id===it.id})){ ps.items.splice(Math.min(ix,ps.items.length),0,JSON.parse(JSON.stringify(it))); ps.minutes=ss.minutes; } });
+  }); }); });
+  ['week','rules','discipline','buildup','fuel','added'].forEach(function(k){ if(starter[k]) p[k]=JSON.parse(JSON.stringify(starter[k])); });
+  p.v=starter.v;
+ }
  Object.keys(starter).forEach(function(k){ if(p[k]==null) p[k]=JSON.parse(JSON.stringify(starter[k])); });
  var ok=p.blocks.every(function(bl){return Array.isArray(bl.days)&&bl.days.length===4&&bl.days.every(function(d){return d&&d.id&&Array.isArray(d.sections)&&d.sections.every(function(s){return s&&Array.isArray(s.items)})})});
  return ok?p:null;
