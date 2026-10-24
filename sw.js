@@ -1,6 +1,6 @@
 // Offline support: app files come from the cache, the page itself is refreshed from the network when online.
-const CACHE = 'pitch-ready-v5';
-const CORE = ['./', './index.html', './app.js?v=5', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
+const CACHE = 'pitch-ready-v6';
+const CORE = ['./', './index.html', './app.js?v=6', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', e => {

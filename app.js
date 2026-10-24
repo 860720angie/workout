@@ -1,5 +1,5 @@
 (function(){
-var KINDS={warm:'Hip prep',strength:'Strength',core:'Core and obliques',cond:'Conditioning',cool:'Cool-down'};
+var KINDS={warm:'Hip prep',strength:'Strength',core:'Core: upper, lower, obliques, rib side',cond:'Conditioning'};
 var WD=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 var WDL=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 var DEFAULT_DAYS=[0,1,3,5];            // slot -> weekday (Mon, Tue, Thu, Sat)
@@ -30,7 +30,7 @@ function upgrade(p){
  if(!Array.isArray(p.blocks)||!p.blocks.length) return null;
  for(var i=p.blocks.length;i<starter.blocks.length;i++) p.blocks.push(JSON.parse(JSON.stringify(starter.blocks[i])));
  // exercises added in newer app versions go into an edited plan too (only those, so deleted ones stay deleted)
- var pv=p.v||1;
+ var pv=p.v||1, fromV=pv;
  if(pv<(starter.v||1)){
   var newIds={}; (starter.added||[]).forEach(function(g){ if(g.v>pv) g.ids.forEach(function(id){newIds[id]=true}); });
   starter.blocks.forEach(function(sb,bi){ var pb=p.blocks[bi]; if(!pb) return; sb.days.forEach(function(sd){ sd.sections.forEach(function(ss){
@@ -41,14 +41,30 @@ function upgrade(p){
   ['week','rules','discipline','buildup','fuel','added'].forEach(function(k){ if(starter[k]) p[k]=JSON.parse(JSON.stringify(starter[k])); });
   p.v=starter.v;
  }
+ // v3: no cool-down, and the core block is four fixed targets (upper abs, lower abs, obliques, rib side)
+ if(fromV<3){
+  p.blocks.forEach(function(bl){ bl.days.forEach(function(d){
+   d.sections=d.sections.filter(function(s){return s.kind!=='cool'});
+   d.sections.forEach(function(ps){
+    if(ps.kind!=='core') return;
+    var ss=null; starter.blocks.forEach(function(sb){ sb.days.forEach(function(sd){ sd.sections.forEach(function(x){ if(x.id===ps.id) ss=x; }); }); });
+    if(!ss) return;
+    ps.title=ss.title; ps.note=ss.note; ps.minutes=ss.minutes;
+    ps.items=ss.items.map(function(it){ return JSON.parse(JSON.stringify(it)); });
+   });
+  }); });
+  p.v=3;
+ }
  Object.keys(starter).forEach(function(k){ if(p[k]==null) p[k]=JSON.parse(JSON.stringify(starter[k])); });
  var ok=p.blocks.every(function(bl){return Array.isArray(bl.days)&&bl.days.length===4&&bl.days.every(function(d){return d&&d.id&&Array.isArray(d.sections)&&d.sections.every(function(s){return s&&Array.isArray(s.items)})})});
  return ok?p:null;
 }
 var plan=null, custom=false;
-var stored=getJSON('pr-plan',null);
+var stored=getJSON('pr-plan',null), storedV=stored?(stored.v||1):0;
 if(stored){ plan=upgrade(stored); custom=!!plan; }
 if(!plan){ plan=JSON.parse(starterStr); custom=false; }
+// an older saved plan that just got upgraded keeps its fixes on the device
+if(custom&&stored&&storedV<(plan.v||1)) ls.set('pr-plan',JSON.stringify(plan));
 
 // ---------- program week / block ----------
 var startStr=ls.get('pr-start'); if(!startStr){ startStr=monStr; ls.set('pr-start',startStr); }
@@ -168,7 +184,7 @@ function itemForm(it,secId){
 function exHtml(it,sec){
  var t=ticks[it.id]||[], n=nsets(it), done=0, b='';
  for(var i=0;i<n;i++){var on=!!t[i]; if(on) done++; b+='<button class="set'+(on?' on':'')+'" data-act="tick" data-id="'+it.id+'" data-i="'+i+'" aria-pressed="'+on+'" aria-label="Set '+(i+1)+'">'+(i+1)+'</button>';}
- var rx='<b>'+esc(it.sets)+' ×</b> '+esc(it.reps)+(it.rest?' <em>· rest '+esc(it.rest)+'</em>':'');
+ var rx=(it.tag?'<span class="tag">'+esc(it.tag)+'</span>':'')+'<b>'+esc(it.sets)+' ×</b> '+esc(it.reps)+(it.rest?' <em>· rest '+esc(it.rest)+'</em>':'');
  var h='<li class="ex'+(done===n?' done':'')+'"><div class="ex-main"><div class="ex-name">'+esc(it.name)+'</div><div class="ex-rx">'+rx+'</div>'+(it.note?'<div class="ex-note">'+esc(it.note)+'</div>':'')+'</div>'+
   '<a class="watch" href="'+esc(videoUrl(it))+'" target="_blank" rel="noopener">'+PLAY+(it.video?'My video':'Watch')+'</a>'+
   '<div class="sets">'+b+'</div>';
@@ -234,7 +250,7 @@ function dayHtml(s){
  h+='<div class="meta"><span><b>~'+Math.round(mins/5)*5+' min</b>'+(minMode?' minimum session':' total')+'</span><span><b>'+done+'</b> of '+total+' sets ticked today</span>'+(done>0?'<button class="btn small" data-act="clearticks">Clear ticks</button>':'')+'</div>';
  h+='<div class="bar"><i style="width:'+(total?Math.round(done/total*100):0)+'%"></i></div></div>';
  if(!S.edit) h+=dayBanner(s);
- if(minMode&&!de) h+='<div class="banner today">Minimum session: conditioning, hip prep and core only. Strength and cool-down are skipped today.</div>';
+ if(minMode&&!de) h+='<div class="banner today">Minimum session: conditioning, hip prep and core only. Strength is skipped today.</div>';
  secs.forEach(function(x){
   h+='<section class="sec k-'+esc(x.kind)+'"><div class="sec-h"><h3>'+esc(x.title||KINDS[x.kind]||'')+'</h3><span>'+(x.minutes?esc(x.minutes)+' min':'')+'</span></div>'+(x.note?'<p class="sec-note">'+esc(x.note)+'</p>':'')+(x.kind==='cond'?stageBanner(s):'')+'<ul class="ex-list">';
   x.items.forEach(function(it){h+=exHtml(it,x)});
@@ -250,7 +266,7 @@ function dayHtml(s){
  return h;
 }
 function guideHtml(){
- var h='<div class="guide"><div class="dayhead"><h2>How it works</h2><p>4 gym days of 1.5-2 hours. Every day: conditioning, hip prep, strength, core and obliques, cool-down. New exercises every '+BLOCK_WEEKS+' weeks: Block 1, Block 2, then back to Block 1 to beat your old numbers.</p></div>';
+ var h='<div class="guide"><div class="dayhead"><h2>How it works</h2><p>4 gym days of 1.5-2 hours. Every day: conditioning, hip prep, strength, then core: upper abs, lower abs, obliques and a hard one for the side of your ribs. New exercises every '+BLOCK_WEEKS+' weeks: Block 1, Block 2, then back to Block 1 to beat your old numbers.</p></div>';
  var nextBlock=addDays(startMon,Math.ceil(week/BLOCK_WEEKS)*BLOCK_WEEKS*7);
  h+='<h3>Your program</h3><div class="callout">You’re in <b>week '+week+'</b>, '+esc(block().name)+'. Next block starts <b>Monday '+nice(nextBlock)+'</b>.<label class="startlab" for="g-start">Program start (a Monday)<input type="date" id="g-start" value="'+ymd(startMon)+'"></label></div>';
  h+='<h3>Discipline rules</h3><ol>'+(plan.discipline||[]).map(function(r){return '<li>'+esc(r)+'</li>'}).join('')+'</ol>';
