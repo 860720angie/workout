@@ -2,10 +2,11 @@
 var KINDS={warm:'Hip prep',strength:'Strength',core:'Core: upper, lower, obliques, rib side',cond:'Conditioning'};
 var WD=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 var WDL=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-var DEFAULT_DAYS=[0,1,3,5];            // slot -> weekday (Mon, Tue, Thu, Sat)
+var DEFAULT_DAYS=[1,5,3,6];            // slot -> weekday (Tue Lower A, Sat Upper, Thu Lower B, Sun Full body)
+var UNAVAIL={0:true,4:true};           // Monday and Friday are never training days
 var LOWER={0:true,2:true};             // Lower A and Lower B
 var MAX_MOVES=2, TARGET=4, BLOCK_WEEKS=6;
-var STAGE_KEYS=['mon','tue','thu','sat'];
+var STAGE_KEYS=['mon','tue','thu','sat'];  // buildup columns: slot 0 Lower A / 1 Upper / 2 Lower B / 3 Full body
 var ls={get:function(k){try{return localStorage.getItem(k)}catch(e){return null}},set:function(k,v){try{localStorage.setItem(k,v);return true}catch(e){return false}},del:function(k){try{localStorage.removeItem(k)}catch(e){}}};
 function getJSON(k,d){try{var v=JSON.parse(ls.get(k)||'null');return v==null?d:v}catch(e){return d}}
 
@@ -79,6 +80,11 @@ function upgrade(p){
   });
   p.v=4;
  }
+ if(fromV<5){
+  p.week=JSON.parse(JSON.stringify(starter.week));
+  p.discipline=JSON.parse(JSON.stringify(starter.discipline));
+  p.v=5;
+ }
  Object.keys(starter).forEach(function(k){ if(p[k]==null) p[k]=JSON.parse(JSON.stringify(starter[k])); });
  var ok=p.blocks.every(function(bl){return Array.isArray(bl.days)&&bl.days.length===4&&bl.days.every(function(d){return d&&d.id&&Array.isArray(d.sections)&&d.sections.every(function(s){return s&&Array.isArray(s.items)})})});
  return ok?p:null;
@@ -112,6 +118,8 @@ function loggedOn(i){var d=ymd(dateOf(i));return wlog.filter(function(e){return 
 var schedKey='pr-sched-'+monStr;
 var sched=getJSON(schedKey,null);
 if(!sched||!Array.isArray(sched.at)||sched.at.length!==4) sched={at:DEFAULT_DAYS.slice(),moves:0};
+// Monday and Friday are never training days: re-plan the week if an older save used them
+if(sched.at.some(function(d){return UNAVAIL[d]})){ sched={at:DEFAULT_DAYS.slice(),moves:sched.moves||0}; ls.set(schedKey,JSON.stringify(sched)); }
 function saveSched(){ ls.set(schedKey,JSON.stringify(sched)); }
 try{for(var i=localStorage.length-1;i>=0;i--){var k=localStorage.key(i); if(k&&k.indexOf('pr-sched-')===0&&k<'pr-sched-'+ymd(addDays(mon,-56))) localStorage.removeItem(k)}}catch(e){}
 
@@ -134,6 +142,7 @@ function moveCheck(s,t){
  var from=sched.at[s];
  if(t===from) return {ok:false,why:'already there'};
  if(t<todayIdx) return {ok:false,why:'that day has passed'};
+ if(UNAVAIL[t]) return {ok:false,why:WDL[t]+' is not a training day'};
  if(loggedOn(t).length) return {ok:false,why:'you already trained that day'};
  var at=sched.at.slice(), other=-1;
  for(var o=0;o<4;o++) if(o!==s&&at[o]===t&&!doneEntry(o)) other=o;
@@ -390,7 +399,7 @@ function guideHtml(){
  h+='<h3>Discipline rules</h3><ol>'+(plan.discipline||[]).map(function(r){return '<li>'+esc(r)+'</li>'}).join('')+'</ol>';
  h+='<h3>Default week</h3><div class="week">'+(plan.week||[]).map(function(w){return '<div><b>'+esc(w.day)+'</b><span>'+esc(w.what)+'</span></div>'}).join('')+'</div>';
  if(plan.buildup&&plan.buildup.length){
-  h+='<h3>Block 1 conditioning build-up</h3><p class="sec-note">The app shows the right stage on each day. Only move up when the stage felt easy and the hip was quiet the next day; otherwise repeat it.</p><div class="bu-wrap"><table class="bu"><thead><tr><th>Weeks</th><th>Mon · rower</th><th>Tue · treadmill</th><th>Thu · rope</th><th>Sat · 15/15</th></tr></thead><tbody>'+
+  h+='<h3>Block 1 conditioning build-up</h3><p class="sec-note">The app shows the right stage on each day. Only move up when the stage felt easy and the hip was quiet the next day; otherwise repeat it.</p><div class="bu-wrap"><table class="bu"><thead><tr><th>Weeks</th><th>Tue · rower</th><th>Sat · run</th><th>Thu · rope</th><th>Sun · 15/15</th></tr></thead><tbody>'+
    plan.buildup.map(function(r,i){return '<tr'+(i===stageIdx&&block().progressive?' class="cur"':'')+'><th>'+esc(r.weeks)+'</th><td>'+esc(r.mon||'')+'</td><td>'+esc(r.tue)+'</td><td>'+esc(r.thu)+'</td><td>'+esc(r.sat)+'</td></tr>'}).join('')+'</tbody></table></div>';
  }
  h+='<h3>Hip rules</h3><ol>'+(plan.rules||[]).map(function(r){return '<li>'+esc(r)+'</li>'}).join('')+'</ol>';
