@@ -55,6 +55,30 @@ function upgrade(p){
   }); });
   p.v=3;
  }
+ // v4: main lifts move to 8-10 reps, and Tue/Sat conditioning becomes a run block plus a boxing/MMA block
+ if(fromV<4){
+  var MAIN={a8:1,a9:1,a10:1,a11:1,b9:1,b10:1,b11:1,b12:1,c8:1,c9:1,c10:1,c11:1,e10:1,e11:1,e12:1,e13:1,
+            m8:1,m9:1,m10:1,m11:1,n9:1,n10:1,n11:1,n12:1,o8:1,o9:1,o10:1,o11:1,p9:1,p10:1};
+  var BOXDAYS={d2:1,d4:1,f2:1,f4:1};
+  p.blocks.forEach(function(bl,bi){
+   var sb=starter.blocks[bi]; if(!sb) return;
+   bl.days.forEach(function(d){
+    var sd=null; sb.days.forEach(function(x){ if(x.id===d.id) sd=x; }); if(!sd) return;
+    d.sections.forEach(function(ps){
+     if(ps.kind!=='strength') return;
+     var ss=null; sd.sections.forEach(function(x){ if(x.id===ps.id) ss=x; }); if(!ss) return;
+     ps.items.forEach(function(pit){ if(!MAIN[pit.id]) return; ss.items.forEach(function(sit){ if(sit.id===pit.id) pit.reps=sit.reps; }); });
+    });
+    if(BOXDAYS[d.id]){
+     var at=d.sections.findIndex(function(x){return x.kind==='cond'}); if(at<0) at=0;
+     var fresh=sd.sections.filter(function(x){return x.kind==='cond'}).map(function(x){return JSON.parse(JSON.stringify(x))});
+     d.sections=d.sections.filter(function(x){return x.kind!=='cond'});
+     Array.prototype.splice.apply(d.sections,[at,0].concat(fresh));
+    }
+   });
+  });
+  p.v=4;
+ }
  Object.keys(starter).forEach(function(k){ if(p[k]==null) p[k]=JSON.parse(JSON.stringify(starter[k])); });
  var ok=p.blocks.every(function(bl){return Array.isArray(bl.days)&&bl.days.length===4&&bl.days.every(function(d){return d&&d.id&&Array.isArray(d.sections)&&d.sections.every(function(s){return s&&Array.isArray(s.items)})})});
  return ok?p:null;
@@ -133,8 +157,92 @@ try{for(var i2=localStorage.length-1;i2>=0;i2--){var k2=localStorage.key(i2); if
 var ticks=getJSON(todayKey,{})||{};
 function saveTicks(){ls.set(todayKey,JSON.stringify(ticks))}
 
-// ---------- ui state ----------
-var S={day:null,edit:false,editing:null,adding:null,confirmDel:null,confirmReset:false,moving:false,msg:'',err:'',restoreOpen:false};
+// ---------- timer ----------
+var TIMK='pr-tim', IVK='pr-iv';
+var TIM={end:0,total:0,label:'',queue:[],ac:null,wake:null,iv:null,on:false,paused:false,leftLeft:0};
+function restSecs(r){var m=/(\d+)\s*(min|s)\b/i.exec(String(r||''));if(!m)return 0;var n=+m[1];return /min/i.test(m[2])?n*60:n}
+function mmss(s){s=Math.max(0,Math.round(s));var m=Math.floor(s/60),r=s%60;return m+':'+String(r).padStart(2,'0')}
+function ivCfg(){var c=getJSON(IVK,{work:40,rest:60,rounds:6});return {work:Math.min(600,Math.max(5,+c.work||40)),rest:Math.min(600,Math.max(0,+c.rest||0)),rounds:Math.min(40,Math.max(1,+c.rounds||6))}}
+function beep(kind){
+ try{
+  var AC=window.AudioContext||window.webkitAudioContext; if(!AC) return;
+  if(!TIM.ac) TIM.ac=new AC();
+  var ac=TIM.ac; if(ac.state==='suspended') ac.resume();
+  var t0=ac.currentTime+0.02;
+  var tones=kind==='end'?[[880,0],[880,.20],[1318,.40]]:kind==='work'?[[1046,0],[1046,.17]]:[[660,0]];
+  tones.forEach(function(x){
+   var o=ac.createOscillator(), g=ac.createGain();
+   o.type='sine'; o.frequency.value=x[0];
+   g.gain.setValueAtTime(.0001,t0+x[1]);
+   g.gain.exponentialRampToValueAtTime(.35,t0+x[1]+.012);
+   g.gain.exponentialRampToValueAtTime(.0001,t0+x[1]+.15);
+   o.connect(g); g.connect(ac.destination);
+   o.start(t0+x[1]); o.stop(t0+x[1]+.18);
+  });
+ }catch(e){}
+}
+function buzz(p){try{if(navigator.vibrate) navigator.vibrate(p)}catch(e){}}
+function wakeOn(){ try{ if(navigator.wakeLock) navigator.wakeLock.request('screen').then(function(w){TIM.wake=w},function(){}); }catch(e){} }
+function wakeOff(){ try{ if(TIM.wake){ TIM.wake.release(); TIM.wake=null; } }catch(e){} }
+function tSave(){ ls.set(TIMK, JSON.stringify({end:TIM.end,total:TIM.total,label:TIM.label,queue:TIM.queue,on:TIM.on})); }
+function tClear(){ ls.del(TIMK); }
+function tPaint(){
+ var el=document.getElementById('tmr'); if(!el) return;
+ if(!TIM.on){ el.hidden=true; return; }
+ el.hidden=false;
+ var left=TIM.paused?TIM.leftLeft:(TIM.end-Date.now())/1000;
+ var t=document.getElementById('tmr-time'), l=document.getElementById('tmr-label'), b=document.getElementById('tmr-fill'), p=document.getElementById('tmr-pause');
+ if(t) t.textContent=mmss(left);
+ if(l) l.textContent=TIM.label||'';
+ if(b) b.style.width=(TIM.total?Math.max(0,Math.min(100,left/TIM.total*100)):0)+'%';
+ if(p) p.textContent=(TIM.paused?'Resume':'Pause');
+ el.classList.toggle('done',left<=0);
+}
+function tStart(queue,first){
+ TIM.queue=queue.slice();
+ TIM.on=true; TIM.paused=false; TIM.leftLeft=0;
+ tNext(first||0);
+ wakeOn();
+ if(TIM.iv) clearInterval(TIM.iv);
+ TIM.iv=setInterval(tTick,250);
+ tPaint();
+}
+function tNext(i){
+ if(i>=TIM.queue.length){ tEnd(); return; }
+ var ph=TIM.queue[i]; TIM.queue=TIM.queue.slice(i);
+ TIM.total=ph.s; TIM.end=Date.now()+ph.s*1000; TIM.label=ph.l;
+ tSave(); tPaint();
+}
+function tTick(){
+ if(!TIM.on||TIM.paused) return;
+ if(Date.now()>=TIM.end){
+  var rest=TIM.queue.slice(1);
+  if(TIM.queue.length>1){
+   var nxt=TIM.queue[1];
+   beep(nxt.kind==='work'?'work':'rest'); buzz(nxt.kind==='work'?[180,80,180]:[120]);
+   tNext(1);
+  } else { beep('end'); buzz([250,120,250,120,250]); tEnd(); }
+ } else tPaint();
+}
+function tEnd(){
+ TIM.on=false; TIM.paused=false; TIM.end=0; TIM.total=0; TIM.label=''; TIM.queue=[];
+ if(TIM.iv){ clearInterval(TIM.iv); TIM.iv=null; }
+ wakeOff(); tClear(); tPaint();
+}
+function tRestart(){
+ var raw=getJSON(TIMK,null); if(!raw||!raw.on||!raw.end) return;
+ if(raw.end>Date.now()){
+  TIM.on=true; TIM.end=raw.end; TIM.total=raw.total; TIM.label=raw.label; TIM.queue=raw.queue||[];
+  wakeOn(); if(TIM.iv) clearInterval(TIM.iv); TIM.iv=setInterval(tTick,250); tPaint();
+ } else tClear();
+}
+// the session clock: first tick or first timer start stamps the gym start time
+var sessKey='pr-sess-'+todayStr;
+try{for(var i3=localStorage.length-1;i3>=0;i3--){var k3=localStorage.key(i3); if(k3&&k3.indexOf('pr-sess-')===0&&k3!==sessKey) localStorage.removeItem(k3)}}catch(e){}
+function markSession(){ if(!ls.get(sessKey)) ls.set(sessKey,String(Date.now())); }
+function sessionMins(){ var s=+ls.get(sessKey)||0; return s?Math.floor((Date.now()-s)/60000):0 }
+
+var S={day:null,edit:false,editing:null,adding:null,confirmDel:null,confirmReset:false,moving:false,msg:'',err:'',restoreOpen:false,ivSec:null};
 function pickDay(){
  for(var s=0;s<4;s++) if(sched.at[s]===todayIdx&&!doneEntry(s)) return String(s);
  var l=loggedOn(todayIdx); if(l.length) return String(l[0].s);
@@ -158,6 +266,7 @@ function changed(){
  else { S.msg='This browser won’t let the app save. Your change works until you close it. Use Backup to keep a copy.'; }
 }
 var PLAY='<svg viewBox="0 0 10 12" aria-hidden="true"><path d="M0 0l10 6-10 6z"/></svg>';
+var CLOCK='<svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M6 3v3.4l2.2 1.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
 
 // ---------- streak ----------
 function streak(){
@@ -186,7 +295,8 @@ function exHtml(it,sec){
  for(var i=0;i<n;i++){var on=!!t[i]; if(on) done++; b+='<button class="set'+(on?' on':'')+'" data-act="tick" data-id="'+it.id+'" data-i="'+i+'" aria-pressed="'+on+'" aria-label="Set '+(i+1)+'">'+(i+1)+'</button>';}
  var rx=(it.tag?'<span class="tag">'+esc(it.tag)+'</span>':'')+'<b>'+esc(it.sets)+' ×</b> '+esc(it.reps)+(it.rest?' <em>· rest '+esc(it.rest)+'</em>':'');
  var h='<li class="ex'+(done===n?' done':'')+'"><div class="ex-main"><div class="ex-name">'+esc(it.name)+'</div><div class="ex-rx">'+rx+'</div>'+(it.note?'<div class="ex-note">'+esc(it.note)+'</div>':'')+'</div>'+
-  '<a class="watch" href="'+esc(videoUrl(it))+'" target="_blank" rel="noopener">'+PLAY+(it.video?'My video':'Watch')+'</a>'+
+  '<div class="ex-side"><a class="watch" href="'+esc(videoUrl(it))+'" target="_blank" rel="noopener">'+PLAY+(it.video?'My video':'Watch')+'</a>'+
+  (restSecs(it.rest)?'<button class="timebtn" data-act="rest" data-s="'+restSecs(it.rest)+'" data-l="'+esc(it.name+' rest')+'">'+CLOCK+esc(it.rest)+'</button>':'')+'</div>'+
   '<div class="sets">'+b+'</div>';
  if(S.edit){
   if(S.editing===it.id){ h+=itemForm(it,sec.id); }
@@ -225,7 +335,16 @@ function dayBanner(s){
  else h+='<div class="banner">Planned for <b>'+WDL[at]+'</b>.</div>';
  h+='<div class="opts">';
  if(c.st==='today') h+= ticks['__min'+s] ? '<button class="btn" data-act="full">Back to the full workout</button>' : '<button class="btn" data-act="min">Low energy: minimum session</button>';
- h+='<button class="btn'+(S.moving?' on':'')+'" data-act="moveopen">Move this workout</button></div>';
+ h+='<button class="btn'+(S.moving?' on':'')+'" data-act="moveopen">Move this workout</button>'+
+   '<button class="btn'+(S.ivSec?' on':'')+'" data-act="ivopen">Interval timer</button></div>';
+ if(S.ivSec){
+  var cfg=ivCfg();
+  h+='<div class="iv"><p>Work / rest rounds. Press start once and it beeps you through every round.</p>'+
+   '<div class="ivrow"><label>Work s<input id="iv-work" inputmode="numeric" value="'+cfg.work+'"></label>'+
+   '<label>Rest s<input id="iv-rest" inputmode="numeric" value="'+cfg.rest+'"></label>'+
+   '<label>Rounds<input id="iv-rounds" inputmode="numeric" value="'+cfg.rounds+'"></label></div>'+
+   '<div class="row"><button class="btn" data-act="ivclose">Close</button><button class="btn primary" data-act="ivstart">Start</button></div></div>';
+ }
  if(S.moving){
   h+='<div class="move"><p>Move '+esc(shortName(s))+' to… <span class="muted">('+Math.max(0,MAX_MOVES-sched.moves)+' of '+MAX_MOVES+' moves left this week)</span></p>';
   for(var t=0;t<7;t++){ if(t===at) continue; var r=moveCheck(s,t);
@@ -247,8 +366,7 @@ function dayHtml(s){
  var h='<div class="dayhead">';
  if(S.edit){ h+='<div class="dayedit"><label class="full">Title<input id="dd-title" value="'+esc(d.title)+'"></label><label class="full">Focus<input id="dd-focus" value="'+esc(d.focus)+'"></label></div>'; }
  else { h+='<h2>'+esc(d.title)+'</h2><p>'+esc(d.focus)+'</p>'; }
- h+='<div class="meta"><span><b>~'+Math.round(mins/5)*5+' min</b>'+(minMode?' minimum session':' total')+'</span><span><b>'+done+'</b> of '+total+' sets ticked today</span>'+(done>0?'<button class="btn small" data-act="clearticks">Clear ticks</button>':'')+'</div>';
- h+='<div class="bar"><i style="width:'+(total?Math.round(done/total*100):0)+'%"></i></div></div>';
+ h+='<div class="meta"><span><b>~'+Math.round(mins/5)*5+' min</b>'+(minMode?' minimum session':' total')+'</span><span><b>'+done+'</b> of '+total+' sets ticked today</span>'+(sessionMins()?'<span>In the gym <b>'+sessionMins()+' min</b></span>':'')+(done>0?'<button class="btn small" data-act="clearticks">Clear ticks</button>':'')+'</div>'; h+='<div class="bar"><i style="width:'+(total?Math.round(done/total*100):0)+'%"></i></div></div>';
  if(!S.edit) h+=dayBanner(s);
  if(minMode&&!de) h+='<div class="banner today">Minimum session: conditioning, hip prep and core only. Strength is skipped today.</div>';
  secs.forEach(function(x){
@@ -330,7 +448,7 @@ document.addEventListener('click',function(ev){
  if(a!=='delyes'&&a!=='del') S.confirmDel=null;
  if(a!=='reset'&&a!=='resetyes') S.confirmReset=false;
  if(a==='day'){ S.day=id; S.editing=null; S.adding=null; S.moving=false; S.msg=''; ls.set('pr-day',id); render(); window.scrollTo(0,0); return; }
- if(a==='tick'){ var i=+b.getAttribute('data-i'); var t=ticks[id]||[]; t[i]=!t[i]; ticks[id]=t; saveTicks(); render(); return; }
+ if(a==='tick'){ var i=+b.getAttribute('data-i'); var t=ticks[id]||[]; t[i]=!t[i]; ticks[id]=t; saveTicks(); markSession(); render(); return; }
  if(a==='clearticks'){ days()[s].sections.forEach(function(x){x.items.forEach(function(it){delete ticks[it.id]})}); saveTicks(); render(); return; }
  if(a==='min'){ ticks['__min'+s]=true; saveTicks(); render(); return; }
  if(a==='full'){ delete ticks['__min'+s]; saveTicks(); render(); return; }
@@ -340,6 +458,19 @@ document.addEventListener('click',function(ev){
  if(a==='finish'){ if(doneEntry(s)) return; log.push({d:todayStr,s:s,b:blockIdx,t:ticks['__min'+s]?'min':'full'}); saveLog(); wlog=weekLog(mon);
   var n=new Set(wlog.map(function(e){return e.s})).size; toast(n>=TARGET?'4 of 4. Week done!':'Logged. '+n+' of '+TARGET+' this week.'); render(); window.scrollTo(0,0); return; }
  if(a==='undo'){ log=log.filter(function(e){return !(e.d===todayStr&&e.s===s)}); saveLog(); wlog=weekLog(mon); render(); return; }
+ if(a==='rest'){ var secs=+b.getAttribute('data-s')||60; markSession(); tStart([{s:secs,l:b.getAttribute('data-l')||'Rest',kind:'rest'}],0); return; }
+ if(a==='ivopen'){ S.ivSec=!S.ivSec; render(); return; }
+ if(a==='ivclose'){ S.ivSec=null; render(); return; }
+ if(a==='ivstart'){
+  var w=Math.min(600,Math.max(5,+((document.getElementById('iv-work')||{}).value)||40));
+  var r=Math.min(600,Math.max(0,+((document.getElementById('iv-rest')||{}).value)||0));
+  var n=Math.min(40,Math.max(1,+((document.getElementById('iv-rounds')||{}).value)||6));
+  ls.set(IVK,JSON.stringify({work:w,rest:r,rounds:n}));
+  var q=[]; for(var k=1;k<=n;k++){ q.push({s:w,l:'Round '+k+' of '+n+' — work',kind:'work'}); if(k<n&&r>0) q.push({s:r,l:'Rest — next is round '+(k+1),kind:'rest'}); }
+  markSession(); tStart(q,0); toast('Timer running: '+n+' rounds'); render(); return; }
+ if(a==='tpause'){ if(!TIM.on) return; if(TIM.paused){ TIM.end=Date.now()+TIM.leftLeft*1000; TIM.paused=false; } else { TIM.leftLeft=Math.max(0,(TIM.end-Date.now())/1000); TIM.paused=true; } tPaint(); return; }
+ if(a==='tadd'){ if(!TIM.on) return; TIM.end+=15000; TIM.total+=15; if(TIM.paused) TIM.leftLeft+=15; tSave(); tPaint(); return; }
+ if(a==='tstop'){ tEnd(); return; }
  if(a==='toggleedit'){ S.edit=!S.edit; S.editing=null; S.adding=null; S.moving=false; S.err=''; if(S.day==='guide'&&S.edit) S.day='0'; render(); return; }
  if(a==='edit'){ S.editing=id; S.adding=null; S.err=''; render(); return; }
  if(a==='add'){ S.adding=b.getAttribute('data-sec'); S.editing=null; S.err=''; render(); return; }
@@ -380,6 +511,11 @@ document.addEventListener('submit',function(ev){
 // a new day while the app stays open: reload so the week, block and ticks are right
 document.addEventListener('visibilitychange',function(){ if(!document.hidden){ var n=new Date(); if(ymd(n)!==todayStr) location.reload(); } });
 render();
+// restore a timer that was running when the page was closed, and keep the body padding right
+tRestart();
+if(TIM.on) document.body.classList.add('has-timer');
+setInterval(function(){ tPaint(); if(TIM.on) document.body.classList.add('has-timer'); else document.body.classList.remove('has-timer'); }, 500);
+document.addEventListener('visibilitychange',function(){ if(!document.hidden){ wakeOn(); tPaint(); } });
 if('serviceWorker' in navigator){ window.addEventListener('load',function(){ navigator.serviceWorker.register('./sw.js').catch(function(){}); }); }
 // for the in-browser checks
 window.__pr={moveCheck:moveCheck,gymDays:gymDays,violations:violations,sched:function(){return sched},week:week,blockIdx:blockIdx};
