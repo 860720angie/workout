@@ -3,7 +3,6 @@ var KINDS={warm:'Hip prep',strength:'Strength',core:'Core: upper, lower, oblique
 var WD=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 var WDL=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 var DEFAULT_DAYS=[1,5,3,6];            // slot -> weekday (Tue Lower A, Sat Upper, Thu Lower B, Sun Full body)
-var UNAVAIL={0:true,4:true};           // Monday and Friday are never training days
 var LOWER={0:true,2:true};             // Lower A and Lower B
 var MAX_MOVES=2, TARGET=4, BLOCK_WEEKS=6;
 var STAGE_KEYS=['mon','tue','thu','sat'];  // buildup columns: slot 0 Lower A / 1 Upper / 2 Lower B / 3 Full body
@@ -23,6 +22,22 @@ function dateOf(i){return addDays(mon,i)}
 
 // ---------- plan ----------
 var starter=JSON.parse(document.getElementById('plan-data').textContent);
+starter.blocks.forEach(function(bl,bi){bl.days.forEach(function(d,si){
+ var core=d.sections.find(function(x){return x.kind==='core'});
+ core.items.push(backExercise(bi,si));
+ core.minutes=(+core.minutes||18)+5;
+ core.note=(core.note||'')+' Lower-back work: gentle movement plus controlled bracing; ask your physio which positions are appropriate for your disc symptoms.';
+});});
+starter.week[0].what='Off by default; available if you move a workout here';
+starter.week[4].what='Off by default; available if you move a workout here';
+starter.discipline=[
+ '4 workouts a week by default: Tuesday, Thursday, Saturday and Sunday. Rest days are available when you need to move a workout.',
+ 'You can move a missed workout to any free day later in the same week, including a usual rest day. You get 2 moves a week.',
+ 'The app keeps Lower A and Lower B apart and avoids 3 training days in a row.',
+ 'No energy at all? Do the minimum session: conditioning, hip prep and core. It still counts.'
+].concat(starter.discipline.slice(5));
+starter.rules.push('Herniated disc: check the lower-back movement with your physio first. Use only comfortable ranges; stop if leg pain, tingling, numbness or weakness worsens. These exercises are not a guaranteed release or treatment.');
+starter.v=6;
 var starterStr=JSON.stringify(starter);
 function upgrade(p){
  if(!p) return null;
@@ -37,10 +52,10 @@ function upgrade(p){
   starter.blocks.forEach(function(sb,bi){ var pb=p.blocks[bi]; if(!pb) return; sb.days.forEach(function(sd){ sd.sections.forEach(function(ss){
    var ps=null; pb.days.forEach(function(d){ (d.sections||[]).forEach(function(x){ if(x.id===ss.id) ps=x; }); }); if(!ps) return;
    if(ps.title===ss.title.replace('Hip and knee prep','Hip prep')) ps.title=ss.title;
-   ss.items.forEach(function(it,ix){ if(newIds[it.id]&&!ps.items.some(function(x){return x.id===it.id})){ ps.items.splice(Math.min(ix,ps.items.length),0,JSON.parse(JSON.stringify(it))); ps.minutes=ss.minutes; } });
+    ss.items.forEach(function(it,ix){ if(newIds[it.id]&&!ps.items.some(function(x){return x.id===it.id})){ ps.items.splice(Math.min(ix,ps.items.length),0,JSON.parse(JSON.stringify(it))); ps.minutes=ss.minutes; } });
   }); }); });
   ['week','rules','discipline','buildup','fuel','added'].forEach(function(k){ if(starter[k]) p[k]=JSON.parse(JSON.stringify(starter[k])); });
-  p.v=starter.v;
+   p.v=starter.v;
  }
  // v3: no cool-down, and the core block is four fixed targets (upper abs, lower abs, obliques, rib side)
  if(fromV<3){
@@ -85,9 +100,43 @@ function upgrade(p){
   p.discipline=JSON.parse(JSON.stringify(starter.discipline));
   p.v=5;
  }
+ if(fromV<6){
+  // Add one optional back movement per session, including plans edited on this device.
+  starter.blocks.forEach(function(sb,bi){
+    var pb=p.blocks[bi]; if(!pb) return;
+    sb.days.forEach(function(sd,si){
+     var pd=pb.days.find(function(d){return d.id===sd.id})||pb.days[si];
+     var ps=pd&&pd.sections.find(function(x){return x.kind==='core'});
+     if(ps){
+      var it=backExercise(bi,si);
+      if(!ps.items.some(function(x){return x.id===it.id})){ps.items.push(it);ps.minutes=(+ps.minutes||18)+5;}
+      ps.note=ps.note||'Ask your physio which lower-back movements are appropriate for your disc symptoms.';
+     }
+    });
+  });
+  p.week=JSON.parse(JSON.stringify(starter.week));
+  p.rules=JSON.parse(JSON.stringify(starter.rules));
+  p.discipline=JSON.parse(JSON.stringify(starter.discipline));
+   p.v=6;
+ }
  Object.keys(starter).forEach(function(k){ if(p[k]==null) p[k]=JSON.parse(JSON.stringify(starter[k])); });
  var ok=p.blocks.every(function(bl){return Array.isArray(bl.days)&&bl.days.length===4&&bl.days.every(function(d){return d&&d.id&&Array.isArray(d.sections)&&d.sections.every(function(s){return s&&Array.isArray(s.items)})})});
  return ok?p:null;
+}
+// A gentle starting point only. With a herniated disc, a clinician should
+// confirm which motions suit the person's symptoms before progressing.
+function backExercise(bi,si){
+ var names=['Quadruped back mobility and brace','Bird-dog hold','Standing back reset and brace','Supported hip-hinge hold'];
+ var notes=[
+  'On hands and knees, breathe slowly and gently shift your weight back and forward only within a comfortable range. Return to a neutral spine, brace lightly for 5 seconds. Do not force a stretch or round into pain.',
+  'On hands and knees, gently brace the abdomen, extend opposite arm and leg without arching or rotating the lower back. Hold 5 seconds, then switch sides. Start small and keep it pain-free.',
+  'Stand tall with hands resting on a counter. Take slow breaths and find a comfortable neutral spine; then lightly brace the trunk for 5 seconds while breathing normally. Avoid forced bending or twisting.',
+  'Hold a counter for support. Hinge a little at the hips with a comfortable neutral spine, gently brace for 5 seconds and stand back up. Keep the movement small; no weights or forced end range.'
+ ];
+ var ix=bi===0?si:(si+2)%4;
+ var reps=ix===0?'5 slow shifts + 5 s brace':'5 × 5 s holds'+(ix===1?' / side':'');
+ var demos=['quadruped rock back gentle lumbar','bird dog neutral spine','standing neutral spine abdominal brace','supported hip hinge neutral spine'];
+ return {id:'back'+bi+si,tag:'Lower back',name:names[ix],sets:2,reps:reps,rest:'30 s',note:notes[ix]+' Stop if symptoms spread down a leg or weakness or numbness increases; check with your physio before using this for a herniated disc.',q:demos[ix]};
 }
 var plan=null, custom=false;
 var stored=getJSON('pr-plan',null), storedV=stored?(stored.v||1):0;
@@ -113,21 +162,21 @@ var log=getJSON('pr-log',[]); if(!Array.isArray(log)) log=[];
 function saveLog(){ log=log.filter(function(e){return parseYmd(e.d)>=addDays(today,-400)}); ls.set('pr-log',JSON.stringify(log)); }
 function weekLog(m){var a=ymd(m),b=ymd(addDays(m,6));return log.filter(function(e){return e.d>=a&&e.d<=b})}
 var wlog=weekLog(mon);
-function doneEntry(s){return wlog.filter(function(e){return e.s===s})[0]}
+function weekSkipped(){return wlog.some(function(e){return e.t==='skipweek'})}
+function doneEntry(s){return wlog.filter(function(e){return e.s===s&&e.t!=='skip'})[0]}
+function skippedEntry(s){return wlog.filter(function(e){return e.s===s&&e.t==='skip'})[0]}
 function loggedOn(i){var d=ymd(dateOf(i));return wlog.filter(function(e){return e.d===d})}
 var schedKey='pr-sched-'+monStr;
 var sched=getJSON(schedKey,null);
 if(!sched||!Array.isArray(sched.at)||sched.at.length!==4) sched={at:DEFAULT_DAYS.slice(),moves:0};
-// Monday and Friday are never training days: re-plan the week if an older save used them
-if(sched.at.some(function(d){return UNAVAIL[d]})){ sched={at:DEFAULT_DAYS.slice(),moves:sched.moves||0}; ls.set(schedKey,JSON.stringify(sched)); }
 function saveSched(){ ls.set(schedKey,JSON.stringify(sched)); }
 try{for(var i=localStorage.length-1;i>=0;i--){var k=localStorage.key(i); if(k&&k.indexOf('pr-sched-')===0&&k<'pr-sched-'+ymd(addDays(mon,-56))) localStorage.removeItem(k)}}catch(e){}
 
 // gym day per weekday for a schedule: logged sessions in the past/today, planned undone ones from today on
 function gymDays(at){
  var g=[null,null,null,null,null,null,null];
- for(var i=0;i<7;i++){ var l=loggedOn(i); if(l.length) g[i]=l[0].s; }
- for(var s=0;s<4;s++){ if(doneEntry(s)) continue; var d=at[s]; if(d>=todayIdx&&g[d]==null) g[d]=s; }
+ for(var i=0;i<7;i++){ var l=loggedOn(i).filter(function(e){return e.t!=='skip'}); if(l.length) g[i]=l[0].s; }
+ for(var s=0;s<4;s++){ if(doneEntry(s)||skippedEntry(s)) continue; var d=at[s]; if(d>=todayIdx&&g[d]==null) g[d]=s; }
  return g;
 }
 function violations(g){
@@ -137,16 +186,17 @@ function violations(g){
  return v;
 }
 function moveCheck(s,t){
+ if(weekSkipped()) return {ok:false,why:'this week is skipped'};
  if(doneEntry(s)) return {ok:false,why:'already done'};
+ if(!Number.isInteger(t)||t<0||t>6) return {ok:false,why:'choose a day this week'};
  if(sched.moves>=MAX_MOVES) return {ok:false,why:'no moves left this week'};
  var from=sched.at[s];
  if(t===from) return {ok:false,why:'already there'};
  if(t<todayIdx) return {ok:false,why:'that day has passed'};
- if(UNAVAIL[t]) return {ok:false,why:WDL[t]+' is not a training day'};
- if(loggedOn(t).length) return {ok:false,why:'you already trained that day'};
+ if(loggedOn(t).length) return {ok:false,why:'a workout is already recorded that day'};
  var at=sched.at.slice(), other=-1;
- for(var o=0;o<4;o++) if(o!==s&&at[o]===t&&!doneEntry(o)) other=o;
- if(other>=0){ if(from<todayIdx) return {ok:false,why:shortName(other)+' is planned then'}; at[other]=from; }
+ for(var o=0;o<4;o++) if(o!==s&&at[o]===t&&!doneEntry(o)&&!skippedEntry(o)) other=o;
+ if(other>=0){ if(from<todayIdx||loggedOn(from).length) return {ok:false,why:shortName(other)+' is planned then; choose a free day'}; at[other]=from; }
  at[s]=t;
  var before=gymDays(sched.at), after=gymDays(at), changed={};
  for(var i=0;i<7;i++) if(before[i]!==after[i]) changed[i]=true;
@@ -155,8 +205,9 @@ function moveCheck(s,t){
  return {ok:true,at:at,swap:other};
 }
 function cellState(i){
- var l=loggedOn(i); if(l.length) return {s:l[0].s,st:l[0].t==='min'?'min':'done'};
- for(var s=0;s<4;s++) if(sched.at[s]===i&&!doneEntry(s)) return {s:s,st:i<todayIdx?'missed':i===todayIdx?'today':'planned'};
+ if(weekSkipped()) return {s:null,st:'weekoff'};
+ var l=loggedOn(i); if(l.length) return {s:l[0].s,st:l[0].t==='skip'?'skip':(l[0].t==='min'?'min':'done')};
+ for(var s=0;s<4;s++) if(sched.at[s]===i&&!doneEntry(s)&&!skippedEntry(s)) return {s:s,st:i<todayIdx?'missed':i===todayIdx?'today':'planned'};
  return {s:null,st:i===todayIdx?'resttoday':'rest'};
 }
 
@@ -171,19 +222,21 @@ var TIMK='pr-tim', IVK='pr-iv';
 var TIM={end:0,total:0,label:'',queue:[],ac:null,wake:null,iv:null,on:false,paused:false,leftLeft:0};
 function restSecs(r){var m=/(\d+)\s*(min|s)\b/i.exec(String(r||''));if(!m)return 0;var n=+m[1];return /min/i.test(m[2])?n*60:n}
 function mmss(s){s=Math.max(0,Math.round(s));var m=Math.floor(s/60),r=s%60;return m+':'+String(r).padStart(2,'0')}
-function ivCfg(){var c=getJSON(IVK,{work:40,rest:60,rounds:6});return {work:Math.min(600,Math.max(5,+c.work||40)),rest:Math.min(600,Math.max(0,+c.rest||0)),rounds:Math.min(40,Math.max(1,+c.rounds||6))}}
+function wholeSeconds(value,fallback,min){if(value===''||value==null)return fallback;var n=Number(value);return Number.isFinite(n)?Math.min(600,Math.max(min,Math.round(n))):fallback}
+function ivCfg(){var c=getJSON(IVK,{work:40,rest:60,rounds:6});return {work:wholeSeconds(c.work,40,5),rest:wholeSeconds(c.rest,60,0),rounds:Math.min(40,Math.max(1,Math.round(Number(c.rounds)||6)))}}
 function beep(kind){
  try{
   var AC=window.AudioContext||window.webkitAudioContext; if(!AC) return;
   if(!TIM.ac) TIM.ac=new AC();
   var ac=TIM.ac; if(ac.state==='suspended') ac.resume();
   var t0=ac.currentTime+0.02;
-  var tones=kind==='end'?[[880,0],[880,.20],[1318,.40]]:kind==='work'?[[1046,0],[1046,.17]]:[[660,0]];
+  // Prominent cues for exercising with the phone across the room.
+  var tones=kind==='end'?[[880,0],[880,.20],[1318,.40],[1318,.60]]:kind==='work'?[[1046,0],[1046,.18],[1318,.36]]:[[660,0],[660,.20],[880,.40]];
   tones.forEach(function(x){
    var o=ac.createOscillator(), g=ac.createGain();
    o.type='sine'; o.frequency.value=x[0];
    g.gain.setValueAtTime(.0001,t0+x[1]);
-   g.gain.exponentialRampToValueAtTime(.35,t0+x[1]+.012);
+   g.gain.exponentialRampToValueAtTime(.8,t0+x[1]+.012);
    g.gain.exponentialRampToValueAtTime(.0001,t0+x[1]+.15);
    o.connect(g); g.connect(ac.destination);
    o.start(t0+x[1]); o.stop(t0+x[1]+.18);
@@ -253,7 +306,9 @@ function sessionMins(){ var s=+ls.get(sessKey)||0; return s?Math.floor((Date.now
 
 var S={day:null,edit:false,editing:null,adding:null,confirmDel:null,confirmReset:false,moving:false,msg:'',err:'',restoreOpen:false,ivSec:null};
 function pickDay(){
- for(var s=0;s<4;s++) if(sched.at[s]===todayIdx&&!doneEntry(s)) return String(s);
+ if(weekSkipped()) return ls.get('pr-day')||'0';
+ for(var s=0;s<4;s++) if(sched.at[s]===todayIdx&&!doneEntry(s)&&!skippedEntry(s)) return String(s);
+ for(var s2=0;s2<4;s2++) if(sched.at[s2]===todayIdx&&skippedEntry(s2)) return String(s2);
  var l=loggedOn(todayIdx); if(l.length) return String(l[0].s);
  var want=ls.get('pr-day'); if(want==='guide'||/^[0-3]$/.test(want||'')) return want;
  return '0';
@@ -280,9 +335,9 @@ var CLOCK='<svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="
 // ---------- streak ----------
 function streak(){
  var n=0, m=addDays(mon,-7);
- var cur=new Set(wlog.map(function(e){return e.s})).size;
- while(m>=startMon){ var c=new Set(weekLog(m).map(function(e){return e.s})).size; if(c>=TARGET) n++; else break; m=addDays(m,-7); }
- return n+(cur>=TARGET?1:0);
+ var cur=new Set(wlog.filter(function(e){return e.t!=='skip'}).map(function(e){return e.s})).size;
+ while(m>=startMon){ var entries=weekLog(m); if(entries.some(function(e){return e.t==='skipweek'})){m=addDays(m,-7);continue;} var c=new Set(entries.filter(function(e){return e.t!=='skip'}).map(function(e){return e.s})).size; if(c>=TARGET) n++; else break; m=addDays(m,-7); }
+ return n+(cur>=TARGET&&!weekSkipped()?1:0);
 }
 
 // ---------- rendering ----------
@@ -317,40 +372,47 @@ function exHtml(it,sec){
 function weekStrip(){
  var h='<div class="wk" role="list">';
  for(var i=0;i<7;i++){ var c=cellState(i), lab=c.s!=null?shortName(c.s):'Rest';
-  var mark={done:'✓',min:'½',missed:'✕',today:'',planned:'',rest:'',resttoday:''}[c.st];
+  var mark={done:'✓',min:'½',skip:'–',weekoff:'–',missed:'✕',today:'',planned:'',rest:'',resttoday:''}[c.st];
   h+='<button class="wk-c st-'+c.st+(i===todayIdx?' is-today':'')+'" role="listitem" '+(c.s!=null?'data-act="day" data-id="'+c.s+'"':'disabled')+'><b>'+WD[i]+'</b><span>'+esc(lab)+'</span><i>'+mark+'</i></button>'; }
  return h+'</div>';
 }
 function weekStatus(){
- var done=new Set(wlog.map(function(e){return e.s})).size, mins=wlog.filter(function(e){return e.t==='min'}).length;
+ var done=new Set(wlog.filter(function(e){return e.t!=='skip'}).map(function(e){return e.s})).size, mins=wlog.filter(function(e){return e.t==='min'}).length;
  var left=TARGET-done, avail=0; for(var i=todayIdx;i<7;i++) if(!loggedOn(i).length) avail++;
  var h='<div class="status"><span><b>Week '+week+'</b> · '+esc(block().name)+', week '+weekInBlock+' of '+BLOCK_WEEKS+'</span><span><b>'+done+' of '+TARGET+'</b> done'+(mins?' ('+mins+' minimum)':'')+'</span><span>Moves left: <b>'+Math.max(0,MAX_MOVES-sched.moves)+'</b></span>';
+ h+='<span>'+(weekSkipped()?'<b>Week skipped</b>':'<button class="btn small" data-act="skipweek">Skip this week</button>')+'</span>';
  var st=streak(); if(st>0) h+='<span>On target <b>'+st+'</b> week'+(st>1?'s':'')+' in a row</span>';
  h+='</div>';
  var y=todayIdx>0?cellState(todayIdx-1):null;
- if(y&&y.st==='missed'&&!loggedOn(todayIdx).length) h+='<div class="nag">You missed '+esc(shortName(y.s))+' yesterday. Never miss twice: train today, even if it’s only the minimum session. Or move it to a later day.</div>';
+ if(y&&y.st==='missed'&&!loggedOn(todayIdx).length) h+='<div class="nag">You missed '+esc(shortName(y.s))+' yesterday. Move it to a free day later this week (including a usual rest day), or train today if your schedule and recovery allow.</div>';
  else if(left>0&&left>avail) h+='<div class="nag">'+left+' workouts left and only '+avail+' day'+(avail===1?'':'s')+' this week. Do what you can. A minimum session still counts.</div>';
  if(weekInBlock===BLOCK_WEEKS) h+='<div class="note-b">Last week of '+esc(block().name)+'. New exercises start next Monday.</div>';
  return h;
 }
 function dayBanner(s){
+ if(weekSkipped()) return '<div class="banner">This week is marked as rest for illness or recovery. Workouts are paused until next week.</div>';
  var de=doneEntry(s), at=sched.at[s], c=cellState(at), h='';
+ var skipped=skippedEntry(s);
  if(de){
   h+='<div class="banner ok">Done on '+WDL[(parseYmd(de.d).getDay()+6)%7]+(de.t==='min'?' (minimum session)':'')+'. '+(de.d===todayStr?'<button class="btn small" data-act="undo">Undo</button>':'')+'</div>';
   return h;
  }
- if(c.st==='today') h+='<div class="banner today"><b>Today’s workout.</b> Sore or no energy? You have options below.</div>';
- else if(c.st==='missed') h+='<div class="banner miss">Planned for '+WDL[at]+' and missed. Move it to a later day this week.</div>';
+ if(skipped){
+  h+='<div class="banner">Skipped on '+WDL[(parseYmd(skipped.d).getDay()+6)%7]+'. Not counted as completed. '+(skipped.d===todayStr?'<button class="btn small" data-act="undo">Undo</button>':'You can still move it to a free day this week.')+'</div>';
+ }
+ else if(c.st==='today') h+='<div class="banner today"><b>Today’s workout.</b> Busy today? You can skip it below. Sore or no energy? You have other options below.</div>';
+ else if(c.st==='missed') h+='<div class="banner miss">Planned for '+WDL[at]+' and missed. Move it to any free future day this week, including a usual rest day.</div>';
  else h+='<div class="banner">Planned for <b>'+WDL[at]+'</b>.</div>';
  h+='<div class="opts">';
- if(c.st==='today') h+= ticks['__min'+s] ? '<button class="btn" data-act="full">Back to the full workout</button>' : '<button class="btn" data-act="min">Low energy: minimum session</button>';
+ if(c.st==='today'&&!skipped) h+= ticks['__min'+s] ? '<button class="btn" data-act="full">Back to the full workout</button>' : '<button class="btn" data-act="min">Low energy: minimum session</button>';
+ if(c.st==='today'&&!skipped) h+='<button class="btn" data-act="skip">Skip today</button>';
  h+='<button class="btn'+(S.moving?' on':'')+'" data-act="moveopen">Move this workout</button>'+
    '<button class="btn'+(S.ivSec?' on':'')+'" data-act="ivopen">Interval timer</button></div>';
  if(S.ivSec){
   var cfg=ivCfg();
   h+='<div class="iv"><p>Work / rest rounds. Press start once and it beeps you through every round.</p>'+
-   '<div class="ivrow"><label>Work s<input id="iv-work" inputmode="numeric" value="'+cfg.work+'"></label>'+
-   '<label>Rest s<input id="iv-rest" inputmode="numeric" value="'+cfg.rest+'"></label>'+
+   '<div class="ivrow"><label>Work seconds<input id="iv-work" type="number" min="5" max="600" step="1" inputmode="numeric" value="'+cfg.work+'"></label>'+
+   '<label>Rest seconds<input id="iv-rest" type="number" min="0" max="600" step="1" inputmode="numeric" value="'+cfg.rest+'"></label>'+
    '<label>Rounds<input id="iv-rounds" inputmode="numeric" value="'+cfg.rounds+'"></label></div>'+
    '<div class="row"><button class="btn" data-act="ivclose">Close</button><button class="btn primary" data-act="ivstart">Start</button></div></div>';
  }
@@ -368,7 +430,7 @@ function stageBanner(s){
  return txt?'<div class="stage"><b>This week (weeks '+esc(row.weeks)+' stage):</b> '+esc(txt)+'</div>':'';
 }
 function dayHtml(s){
- var d=days()[s], minMode=!!ticks['__min'+s], de=doneEntry(s);
+ var d=days()[s], minMode=!!ticks['__min'+s], de=doneEntry(s), skipped=skippedEntry(s);
  var secs=d.sections.filter(function(x){return !minMode||x.kind==='cond'||x.kind==='warm'||x.kind==='core'});
  var total=0,mins=0,done=0;
  secs.forEach(function(x){mins+=(+x.minutes||0); x.items.forEach(function(it){var n=nsets(it); total+=n; var t=ticks[it.id]||[]; for(var i=0;i<n;i++) if(t[i]) done++;})});
@@ -385,15 +447,16 @@ function dayHtml(s){
   if(S.edit){ h+= (S.adding===x.id? itemForm(null,x.id) : '<button class="add" data-act="add" data-sec="'+x.id+'">+ Add exercise to '+esc(x.title||KINDS[x.kind])+'</button>'); }
   h+='</section>';
  });
- if(!S.edit&&!de){
+ if(!S.edit&&!de&&!weekSkipped()){
   var c=cellState(sched.at[s]);
-  if(c.st==='today') h+='<button class="finish" data-act="finish">'+(minMode?'Finish minimum session':'Finish workout')+'</button><p class="sec-note center">Tap when you’re done, even if you skipped a few sets.</p>';
+  if(c.st==='today'&&!skipped) h+='<button class="finish" data-act="finish">'+(minMode?'Finish minimum session':'Finish workout')+'</button><p class="sec-note center">Tap when you’re done, even if you skipped a few sets.</p>';
+  else if(skipped) h+='<p class="sec-note center">Move this workout to another day if you still want to complete it this week.</p>';
   else h+='<p class="sec-note center">To do this workout today, use <b>Move this workout</b> at the top.</p>';
  }
  return h;
 }
 function guideHtml(){
- var h='<div class="guide"><div class="dayhead"><h2>How it works</h2><p>4 gym days of 1.5-2 hours. Every day: conditioning, hip prep, strength, then core: upper abs, lower abs, obliques and a hard one for the side of your ribs. New exercises every '+BLOCK_WEEKS+' weeks: Block 1, Block 2, then back to Block 1 to beat your old numbers.</p></div>';
+ var h='<div class="guide"><div class="dayhead"><h2>How it works</h2><p>4 gym days of 1.5-2 hours. Every day: conditioning, hip prep, strength, then core: upper abs, lower abs, obliques, rib-side work and a gentle lower-back movement. Ask your physio which movements suit your disc symptoms. New exercises every '+BLOCK_WEEKS+' weeks: Block 1, Block 2, then back to Block 1 to beat your old numbers.</p></div>';
  var nextBlock=addDays(startMon,Math.ceil(week/BLOCK_WEEKS)*BLOCK_WEEKS*7);
  h+='<h3>Your program</h3><div class="callout">You’re in <b>week '+week+'</b>, '+esc(block().name)+'. Next block starts <b>Monday '+nice(nextBlock)+'</b>.<label class="startlab" for="g-start">Program start (a Monday)<input type="date" id="g-start" value="'+ymd(startMon)+'"></label></div>';
  h+='<h3>Discipline rules</h3><ol>'+(plan.discipline||[]).map(function(r){return '<li>'+esc(r)+'</li>'}).join('')+'</ol>';
@@ -457,25 +520,36 @@ document.addEventListener('click',function(ev){
  if(a!=='delyes'&&a!=='del') S.confirmDel=null;
  if(a!=='reset'&&a!=='resetyes') S.confirmReset=false;
  if(a==='day'){ S.day=id; S.editing=null; S.adding=null; S.moving=false; S.msg=''; ls.set('pr-day',id); render(); window.scrollTo(0,0); return; }
- if(a==='tick'){ var i=+b.getAttribute('data-i'); var t=ticks[id]||[]; t[i]=!t[i]; ticks[id]=t; saveTicks(); markSession(); render(); return; }
+ if(a==='skipweek'){
+  if(weekSkipped()){
+   log=log.filter(function(e){return !(e.d>=monStr&&e.d<=ymd(addDays(mon,6))&&e.t==='skipweek')});
+   saveLog(); wlog=weekLog(mon); toast('This week is active again');
+  } else {
+   log=log.filter(function(e){return !(e.d>=monStr&&e.d<=ymd(addDays(mon,6))&&e.t==='skipweek')});
+   log.push({d:monStr,s:-1,b:blockIdx,t:'skipweek'}); saveLog(); wlog=weekLog(mon); toast('This week skipped');
+  }
+  render(); return;
+ }
+ if(a==='tick'){ if(weekSkipped()) return; var i=+b.getAttribute('data-i'); var t=ticks[id]||[]; t[i]=!t[i]; ticks[id]=t; saveTicks(); markSession(); render(); return; }
  if(a==='clearticks'){ days()[s].sections.forEach(function(x){x.items.forEach(function(it){delete ticks[it.id]})}); saveTicks(); render(); return; }
  if(a==='min'){ ticks['__min'+s]=true; saveTicks(); render(); return; }
  if(a==='full'){ delete ticks['__min'+s]; saveTicks(); render(); return; }
  if(a==='moveopen'){ S.moving=!S.moving; render(); return; }
- if(a==='moveto'){ var r=moveCheck(s,+b.getAttribute('data-t')); if(!r.ok) return; sched.at=r.at; sched.moves++; saveSched(); S.moving=false;
+ if(a==='moveto'){ var r=moveCheck(s,+b.getAttribute('data-t')); if(!r.ok) return; sched.at=r.at; sched.moves++; saveSched(); if(skippedEntry(s)){ log=log.filter(function(e){return !(e.s===s&&e.t==='skip'&&e.d>=monStr&&e.d<=ymd(addDays(mon,6)))}); saveLog(); wlog=weekLog(mon); } S.moving=false;
   toast(shortName(s)+' moved to '+WDL[r.at[s]]); render(); return; }
- if(a==='finish'){ if(doneEntry(s)) return; log.push({d:todayStr,s:s,b:blockIdx,t:ticks['__min'+s]?'min':'full'}); saveLog(); wlog=weekLog(mon);
-  var n=new Set(wlog.map(function(e){return e.s})).size; toast(n>=TARGET?'4 of 4. Week done!':'Logged. '+n+' of '+TARGET+' this week.'); render(); window.scrollTo(0,0); return; }
+ if(a==='finish'){ if(weekSkipped()||doneEntry(s)||skippedEntry(s)||cellState(todayIdx).s!==s) return; log.push({d:todayStr,s:s,b:blockIdx,t:ticks['__min'+s]?'min':'full'}); saveLog(); wlog=weekLog(mon);
+  var n=new Set(wlog.filter(function(e){return e.t!=='skip'}).map(function(e){return e.s})).size; toast(n>=TARGET?'4 of 4. Week done!':'Logged. '+n+' of '+TARGET+' this week.'); render(); window.scrollTo(0,0); return; }
+ if(a==='skip'){ if(weekSkipped()||doneEntry(s)||skippedEntry(s)||cellState(todayIdx).s!==s) return; log.push({d:todayStr,s:s,b:blockIdx,t:'skip'}); saveLog(); wlog=weekLog(mon); toast('Workout skipped for today'); render(); window.scrollTo(0,0); return; }
  if(a==='undo'){ log=log.filter(function(e){return !(e.d===todayStr&&e.s===s)}); saveLog(); wlog=weekLog(mon); render(); return; }
  if(a==='rest'){ var secs=+b.getAttribute('data-s')||60; markSession(); tStart([{s:secs,l:b.getAttribute('data-l')||'Rest',kind:'rest'}],0); return; }
  if(a==='ivopen'){ S.ivSec=!S.ivSec; render(); return; }
  if(a==='ivclose'){ S.ivSec=null; render(); return; }
  if(a==='ivstart'){
-  var w=Math.min(600,Math.max(5,+((document.getElementById('iv-work')||{}).value)||40));
-  var r=Math.min(600,Math.max(0,+((document.getElementById('iv-rest')||{}).value)||0));
-  var n=Math.min(40,Math.max(1,+((document.getElementById('iv-rounds')||{}).value)||6));
+  var w=wholeSeconds((document.getElementById('iv-work')||{}).value,40,5);
+  var r=wholeSeconds((document.getElementById('iv-rest')||{}).value,60,0);
+  var n=Math.min(40,Math.max(1,Math.round(Number((document.getElementById('iv-rounds')||{}).value)||6)));
   ls.set(IVK,JSON.stringify({work:w,rest:r,rounds:n}));
-  var q=[]; for(var k=1;k<=n;k++){ q.push({s:w,l:'Round '+k+' of '+n+' — work',kind:'work'}); if(k<n&&r>0) q.push({s:r,l:'Rest — next is round '+(k+1),kind:'rest'}); }
+  var q=[]; for(var k=1;k<=n;k++){ q.push({s:w,l:'Round '+k+' of '+n+' — work ('+w+' s)',kind:'work'}); if(k<n&&r>0) q.push({s:r,l:'Rest — '+r+' s, next is round '+(k+1),kind:'rest'}); }
   markSession(); tStart(q,0); toast('Timer running: '+n+' rounds'); render(); return; }
  if(a==='tpause'){ if(!TIM.on) return; if(TIM.paused){ TIM.end=Date.now()+TIM.leftLeft*1000; TIM.paused=false; } else { TIM.leftLeft=Math.max(0,(TIM.end-Date.now())/1000); TIM.paused=true; } tPaint(); return; }
  if(a==='tadd'){ if(!TIM.on) return; TIM.end+=15000; TIM.total+=15; if(TIM.paused) TIM.leftLeft+=15; tSave(); tPaint(); return; }
